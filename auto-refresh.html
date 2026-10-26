@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auto Refresh</title>
+<style>
+/* Layout: kolom daftar halaman di kiri, panel kontrol + pratinjau di kanan; satu kolom di layar sempit. */
+:root {
+  --bg: #eef1f5;
+  --panel: #ffffff;
+  --panel-2: #f5f7fa;
+  --fg: #16202e;
+  --muted: #5d6b7e;
+  --line: #d8dee7;
+  --accent: #1f55d6;
+  --accent-fg: #ffffff;
+  --ok: #17803d;
+  --warn: #b25e09;
+  --bad: #c2362b;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151e; --panel: #161e2a; --panel-2: #1c2634; --fg: #e6ebf2; --muted: #93a1b5;
+    --line: #2a3647; --accent: #6b93ff; --accent-fg: #0b1220; --ok: #4cc27a; --warn: #e3a24a; --bad: #f06a5e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151e; --panel: #161e2a; --panel-2: #1c2634; --fg: #e6ebf2; --muted: #93a1b5;
+  --line: #2a3647; --accent: #6b93ff; --accent-fg: #0b1220; --ok: #4cc27a; --warn: #e3a24a; --bad: #f06a5e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.45;
+  padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1280px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 1.35rem; margin: 0; letter-spacing: -0.01em; }
+.sub { color: var(--muted); margin: 2px 0 0; font-size: 0.9rem; }
+.top-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.btn {
+  border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 8px 14px;
+  min-height: 38px; font-weight: 600;
+}
+.btn:hover { background: var(--panel-2); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.stop { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn.small { min-height: 30px; padding: 4px 10px; font-size: 0.85rem; }
+.btn.ghost { background: transparent; }
+
+.layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; }
+.panel h2 { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+
+/* daftar halaman */
+.list { display: grid; gap: 6px; margin-bottom: 10px; }
+.item {
+  width: 100%; text-align: left; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  border: 1px solid var(--line); background: var(--panel-2); border-radius: 6px; padding: 9px 10px;
+}
+.item[aria-current="true"] { border-color: var(--accent); background: var(--panel); box-shadow: inset 0 0 0 1px var(--accent); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+.dot.on { background: var(--ok); }
+.dot.done { background: var(--warn); }
+.item .nm { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .ho { color: var(--muted); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .cd { font-family: var(--mono); font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.item .cd.on { color: var(--fg); }
+
+/* kontrol */
+.main { display: grid; gap: 16px; min-width: 0; }
+.controls { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 20px; }
+@media (max-width: 720px) { .controls { grid-template-columns: minmax(0, 1fr); } }
+.fields { display: grid; gap: 12px; min-width: 0; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+label.f { display: grid; gap: 4px; font-size: 0.8rem; color: var(--muted); font-weight: 600; min-width: 0; }
+label.f.grow { flex: 1 1 200px; }
+input[type="text"], input[type="url"], input[type="number"], select {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; min-height: 38px; width: 100%;
+  color: var(--fg); font-weight: 400;
+}
+input[type="number"] { width: 110px; font-variant-numeric: tabular-nums; }
+select { width: auto; min-width: 110px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); background: var(--panel-2); border-radius: 999px; padding: 3px 11px; font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.chip:hover { border-color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: var(--panel-2); padding: 8px 12px; min-height: 38px; border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+.checks { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.9rem; }
+.checks label { display: inline-flex; gap: 7px; align-items: center; }
+.hint { color: var(--muted); font-size: 0.82rem; margin: 0; }
+.err { color: var(--bad); font-size: 0.85rem; min-height: 1.2em; margin: 0; }
+
+/* penghitung */
+.dial { display: grid; gap: 12px; justify-items: center; align-content: start; }
+.ring { position: relative; width: 150px; height: 150px; }
+.ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring .bg { stroke: var(--line); }
+.ring .fg { stroke: var(--accent); transition: stroke-dashoffset 0.5s linear; }
+.ring .num {
+  position: absolute; inset: 0; display: grid; place-items: center; align-content: center; text-align: center;
+  font-family: var(--mono); font-size: 1.7rem; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.ring .num small { display: block; font-family: var(--sans); font-size: 0.72rem; color: var(--muted); font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; }
+.dial .btns { display: grid; gap: 8px; width: 100%; }
+.dial .btns .btn { width: 100%; }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; width: 100%; font-size: 0.8rem; color: var(--muted); }
+.stats b { display: block; color: var(--fg); font-family: var(--mono); font-weight: 600; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+
+/* pratinjau */
+.preview-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.preview-head h2 { margin: 0; }
+.stage { position: relative; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel-2); height: min(70vh, 720px); min-height: 360px; }
+.stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
+.stage .empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--muted); }
+.stage:fullscreen { height: 100vh; border: 0; border-radius: 0; }
+.how { display: grid; gap: 6px; }
+.how p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+.how b { color: var(--fg); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Auto Refresh</h1>
+      <p class="sub">Muat ulang halaman web otomatis dengan jeda yang Anda atur sendiri.</p>
+    </div>
+    <div class="top-actions">
+      <button class="btn small" id="themeBtn" type="button">Tema</button>
+      <button class="btn small" id="stopAll" type="button">Hentikan semua</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="panel">
+      <h2>Halaman</h2>
+      <div class="list" id="list"></div>
+      <button class="btn small" id="addBtn" type="button">+ Tambah halaman</button>
+    </aside>
+
+    <main class="main">
+      <section class="panel">
+        <div class="controls">
+          <div class="fields">
+            <div class="row">
+              <label class="f grow">Nama
+                <input type="text" id="fName" maxlength="40" autocomplete="off">
+              </label>
+            </div>
+            <div class="row">
+              <label class="f grow">Alamat halaman (URL)
+                <input type="text" id="fUrl" inputmode="url" placeholder="https://contoh.com/halaman" autocomplete="off" spellcheck="false">
+              </label>
+            </div>
+            <div class="row">
+              <label class="f">Setiap
+                <input type="number" id="fVal" min="1" max="999999" step="1">
+              </label>
+              <label class="f">Satuan
+                <select id="fUnit">
+                  <option value="1">detik</option>
+                  <option value="60">menit</option>
+                  <option value="3600">jam</option>
+                </select>
+              </label>
+              <div class="chips" id="chips" aria-label="Pilihan cepat"></div>
+            </div>
+            <div class="row">
+              <div>
+                <div class="hint" style="margin-bottom:4px">Cara menampilkan</div>
+                <div class="seg" role="group" aria-label="Cara menampilkan">
+                  <button type="button" id="modeFrame" aria-pressed="true">Di halaman ini</button>
+                  <button type="button" id="modePopup" aria-pressed="false">Jendela terpisah</button>
+                </div>
+              </div>
+              <label class="f">Berhenti setelah (0 = tanpa batas)
+                <input type="number" id="fMax" min="0" max="999999" step="1">
+              </label>
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" id="fBust"> Tambahkan kode unik agar tidak memakai cache</label>
+              <label><input type="checkbox" id="fWake"> Jaga layar tetap menyala</label>
+            </div>
+            <p class="err" id="err" role="alert"></p>
+            <p class="hint" id="modeHint"></p>
+          </div>
+
+          <div class="dial">
+            <div class="ring" aria-live="off">
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle class="bg" cx="60" cy="60" r="52" fill="none" stroke-width="8"></circle>
+                <circle class="fg" id="ringFg" cx="60" cy="60" r="52" fill="none" stroke-width="8" stroke-linecap="round" stroke-dasharray="326.73" stroke-dashoffset="0"></circle>
+              </svg>
+              <div class="num"><span id="clock">--:--</span><small id="state">Berhenti</small></div>
+            </div>
+            <div class="btns">
+              <button class="btn primary" id="toggle" type="button">Mulai</button>
+              <button class="btn" id="now" type="button">Muat ulang sekarang</button>
+            </div>
+            <div class="stats">
+              <div>Jumlah muat ulang<b id="sCount">0</b></div>
+              <div>Terakhir<b id="sLast">-</b></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="preview-head">
+          <h2>Pratinjau</h2>
+          <button class="btn small" id="fsBtn" type="button">Layar penuh</button>
+        </div>
+        <div class="stage" id="stage">
+          <div class="empty" id="empty">Isi alamat halaman lalu tekan Mulai.</div>
+        </div>
+      </section>
+
+      <section class="panel how">
+        <h2>Catatan penggunaan</h2>
+        <p><b>Di halaman ini:</b> halaman target tampil di kotak pratinjau. Sebagian situs (bank, media sosial, Google, dan lainnya) menolak ditampilkan di dalam halaman lain. Jika kotak tetap kosong atau muncul pesan penolakan, pakai <b>Jendela terpisah</b>.</p>
+        <p><b>Jendela terpisah:</b> membuka halaman di jendela baru dan memuat ulangnya sesuai jeda. Izinkan pop-up untuk alamat ini, lalu biarkan jendela tetap terbuka.</p>
+        <p><b>Tetap berjalan:</b> biarkan tab ini terbuka. Pengaturan tersimpan di peramban, dan hitungan memakai waktu nyata sehingga tetap akurat walau tab di latar belakang.</p>
+        <p><b>Dipakai di mana saja:</b> ini satu file HTML tanpa server. Simpan, lalu buka di peramban perangkat apa pun, atau unggah ke hosting statis seperti GitHub Pages atau Netlify. Alamat <code>http://</code> tidak bisa ditampilkan di halaman <code>https://</code>; pakai Jendela terpisah untuk kasus itu.</p>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var KEY = "autorefresh.v1";
+  var CIRC = 2 * Math.PI * 52;
+  var PRESETS = [
+    { l: "5 dtk", s: 5 }, { l: "10 dtk", s: 10 }, { l: "30 dtk", s: 30 },
+    { l: "1 mnt", s: 60 }, { l: "5 mnt", s: 300 }, { l: "15 mnt", s: 900 }, { l: "1 jam", s: 3600 }
+  ];
+  var $ = function (id) { return document.getElementById(id); };
+
+  var targets = [];
+  var selId = null;
+  var rt = {};      // runtime per target: nextAt, count, last, win, frame
+  var wakeLock = null;
+  var worker = null;
+  var fallbackTimer = null;
+
+  function uid() { return "t" + Math.random().toString(36).slice(2, 9); }
+  function newTarget(over) {
+    var t = { id: uid(), name: "Halaman baru", url: "", value: 30, unit: 1, mode: "frame", bust: true, max: 0, wake: false, running: false };
+    for (var k in over) t[k] = over[k];
+    return t;
+  }
+  function getT(id) { for (var i = 0; i < targets.length; i++) if (targets[i].id === id) return targets[i]; return null; }
+  function R(id) { return rt[id] || (rt[id] = { nextAt: 0, count: 0, last: 0, win: null, frame: null }); }
+  function secs(t) { return Math.max(1, Math.round((Number(t.value) || 1) * Number(t.unit))); }
+
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({ sel: selId, targets: targets.map(function (t) {
+        var c = {}; for (var k in t) c[k] = t[k]; return c;
+      }) }));
+    } catch (e) {}
+  }
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (raw) {
+        var d = JSON.parse(raw);
+        if (d && d.targets && d.targets.length) {
+          targets = d.targets.map(function (x) { return newTarget(x); });
+          selId = getT(d.sel) ? d.sel : targets[0].id;
+          return;
+        }
+      }
+    } catch (e) {}
+    targets = [newTarget({ name: "Contoh", url: "https://example.com", value: 30 })];
+    selId = targets[0].id;
+  }
+
+  function normUrl(raw) {
+    var s = (raw || "").trim();
+    if (!s) return "";
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) s = "https://" + s;
+    try {
+      var u = new URL(s);
+      if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+      return u.href;
+    } catch (e) { return ""; }
+  }
+  function finalUrl(t) {
+    var u = normUrl(t.url);
+    if (!u) return "";
+    if (!t.bust) return u;
+    try {
+      var x = new URL(u);
+      x.searchParams.set("_ar", Date.now().toString(36));
+      return x.href;
+    } catch (e) { return u; }
+  }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function host(u) { try { return new URL(normUrl(u)).host; } catch (e) { return "belum ada alamat"; } }
+  function fmt(sec) {
+    sec = Math.max(0, Math.ceil(sec));
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return h ? h + ":" + p(m) + ":" + p(s) : p(m) + ":" + p(s);
+  }
+  function clockTime(ts) {
+    if (!ts) return "-";
+    var d = new Date(ts), p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+
+  /* ---------- iframe ---------- */
+  function ensureFrame(t) {
+    var r = R(t.id);
+    if (!r.frame) {
+      var f = document.createElement("iframe");
+      f.title = "Pratinjau " + t.name;
+      f.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
+      f.setAttribute("allow", "fullscreen");
+      f.hidden = true;
+      $("stage").appendChild(f);
+      r.frame = f;
+    }
+    return r.frame;
+  }
+  function showFrames() {
+    var any = false;
+    targets.forEach(function (t) {
+      var r = R(t.id);
+      if (r.frame) {
+        var visible = t.id === selId && t.mode === "frame" && r.frame.getAttribute("data-on") === "1";
+        r.frame.hidden = !visible;
+        if (visible) any = true;
+      }
+    });
+    var cur = getT(selId);
+    var em = $("empty");
+    em.hidden = any;
+    if (!any && cur) {
+      em.textContent = cur.mode === "popup"
+        ? (R(cur.id).win && !R(cur.id).win.closed ? "Halaman sedang tampil di jendela terpisah." : "Mode jendela terpisah: halaman akan dibuka di jendela baru saat Anda menekan Mulai.")
+        : "Isi alamat halaman lalu tekan Mulai.";
+    }
+  }
+  function loadFrame(t) {
+    var u = finalUrl(t);
+    if (!u) return false;
+    var f = ensureFrame(t);
+    f.setAttribute("data-on", "1");
+    f.src = u;
+    return true;
+  }
+
+  /* ---------- refresh ---------- */
+  function doRefresh(t) {
+    var r = R(t.id);
+    var u = finalUrl(t);
+    if (!u) return;
+    if (t.mode === "popup") {
+      if (!r.win || r.win.closed) { stop(t, "Jendela ditutup"); return; }
+      try { r.win.location.href = u; } catch (e) { stop(t, "Jendela tidak bisa diakses"); return; }
+    } else {
+      loadFrame(t);
+    }
+    r.count++;
+    r.last = Date.now();
+    if (t.max > 0 && r.count >= t.max) { stop(t, "Selesai"); return; }
+  }
+
+  function start(t) {
+    var u = normUrl(t.url);
+    if (!u) { setErr("Alamat belum valid. Contoh: https://contoh.com"); return; }
+    setErr("");
+    var r = R(t.id);
+    if (t.mode === "popup") {
+      var w = null;
+      try { w = window.open(u, "ar_" + t.id, "width=1100,height=800"); } catch (e) {}
+      if (!w) { setErr("Pop-up diblokir. Izinkan pop-up untuk halaman ini lalu coba lagi."); return; }
+      r.win = w;
+    } else {
+      loadFrame(t);
+    }
+    r.count = 0;
+    r.last = Date.now();
+    r.nextAt = Date.now() + secs(t) * 1000;
+    r.state = "";
+    t.running = true;
+    save();
+    ensureTicker();
+    syncWake();
+    render();
+  }
+  function stop(t, why) {
+    t.running = false;
+    R(t.id).state = why || "";
+    save();
+    syncWake();
+    render();
+  }
+
+  /* ---------- ticker (worker agar tidak melambat di tab latar) ---------- */
+  function ensureTicker() {
+    if (worker || fallbackTimer) return;
+    try {
+      var blob = new Blob(["setInterval(function(){postMessage(0)},500)"], { type: "text/javascript" });
+      worker = new Worker(URL.createObjectURL(blob));
+      worker.onmessage = tick;
+    } catch (e) {
+      fallbackTimer = setInterval(tick, 500);
+    }
+  }
+  function tick() {
+    var now = Date.now();
+    targets.forEach(function (t) {
+      if (!t.running) return;
+      var r = R(t.id);
+      if (now >= r.nextAt) {
+        doRefresh(t);
+        if (t.running) {
+          var step = secs(t) * 1000;
+          r.nextAt += step;
+          if (r.nextAt <= now) r.nextAt = now + step;
+        }
+      }
+    });
+    paintLive();
+  }
+
+  /* ---------- wake lock ---------- */
+  function syncWake() {
+    var need = targets.some(function (t) { return t.running && t.wake; });
+    if (need && !wakeLock && navigator.wakeLock && document.visibilityState === "visible") {
+      navigator.wakeLock.request("screen").then(function (l) {
+        wakeLock = l;
+        l.addEventListener("release", function () { wakeLock = null; });
+      }).catch(function () {});
+    } else if (!need && wakeLock) {
+      wakeLock.release().catch(function () {}); wakeLock = null;
+    }
+  }
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") syncWake(); });
+
+  /* ---------- UI ---------- */
+  function setErr(m) { $("err").textContent = m || ""; }
+
+  function renderList() {
+    var el = $("list");
+    el.innerHTML = "";
+    targets.forEach(function (t) {
+      var r = R(t.id);
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "item";
+      b.setAttribute("data-id", t.id);
+      b.setAttribute("aria-current", t.id === selId ? "true" : "false");
+      var cls = t.running ? "on" : (r.state === "Selesai" ? "done" : "");
+      b.innerHTML = '<span class="dot ' + cls + '"></span>' +
+        '<span style="min-width:0"><span class="nm" style="display:block">' + esc(t.name || "Tanpa nama") + '</span>' +
+        '<span class="ho" style="display:block">' + esc(host(t.url)) + '</span></span>' +
+        '<span class="cd" data-cd="' + t.id + '"></span>';
+      b.addEventListener("click", function () { select(t.id); });
+      el.appendChild(b);
+    });
+    paintLive();
+  }
+
+  function paintLive() {
+    var now = Date.now();
+    targets.forEach(function (t) {
+      var c = document.querySelector('[data-cd="' + t.id + '"]');
+      if (c) {
+        var on = t.running;
+        c.textContent = on ? fmt((R(t.id).nextAt - now) / 1000) : "";
+        c.className = "cd" + (on ? " on" : "");
+      }
+    });
+    var t = getT(selId);
+    if (!t) return;
+    var r = R(t.id);
+    var total = secs(t);
+    if (t.running) {
+      var left = Math.max(0, (r.nextAt - now) / 1000);
+      $("clock").textContent = fmt(left);
+      $("state").textContent = "Berjalan";
+      $("ringFg").style.strokeDashoffset = String(CIRC * (1 - left / total));
+      document.title = "(" + fmt(left) + ") Auto Refresh";
+    } else {
+      $("clock").textContent = fmt(total);
+      $("state").textContent = r.state || "Berhenti";
+      $("ringFg").style.strokeDashoffset = "0";
+      var anyRun = targets.some(function (x) { return x.running; });
+      if (!anyRun) document.title = "Auto Refresh";
+    }
+    $("sCount").textContent = String(r.count);
+    $("sLast").textContent = clockTime(r.last);
+  }
+
+  function renderForm() {
+    var t = getT(selId);
+    if (!t) return;
+    var a = document.activeElement;
+    if (a !== $("fName")) $("fName").value = t.name;
+    if (a !== $("fUrl")) $("fUrl").value = t.url;
+    if (a !== $("fVal")) $("fVal").value = t.value;
+    $("fUnit").value = String(t.unit);
+    $("fMax").value = t.max;
+    $("fBust").checked = !!t.bust;
+    $("fWake").checked = !!t.wake;
+    $("fWake").disabled = !navigator.wakeLock;
+    $("modeFrame").setAttribute("aria-pressed", t.mode === "frame" ? "true" : "false");
+    $("modePopup").setAttribute("aria-pressed", t.mode === "popup" ? "true" : "false");
+    $("modeHint").textContent = t.mode === "frame"
+      ? "Halaman tampil di kotak pratinjau di bawah. Beberapa situs menolak ditampilkan seperti ini."
+      : "Halaman dibuka di jendela baru dan dimuat ulang dari sini. Cocok untuk situs yang menolak ditampilkan di dalam halaman.";
+    var tog = $("toggle");
+    tog.textContent = t.running ? "Berhenti" : "Mulai";
+    tog.className = "btn " + (t.running ? "stop" : "primary");
+    $("now").disabled = !t.running;
+    var cur = secs(t);
+    Array.prototype.forEach.call($("chips").children, function (c) {
+      c.setAttribute("aria-pressed", String(Number(c.getAttribute("data-s")) === cur));
+    });
+  }
+
+  function render() { renderList(); renderForm(); showFrames(); paintLive(); }
+
+  function select(id) {
+    selId = id; setErr(""); save(); render();
+  }
+
+  function buildChips() {
+    var box = $("chips");
+    PRESETS.forEach(function (p) {
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "chip"; b.textContent = p.l; b.setAttribute("data-s", p.s);
+      b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", function () {
+        var t = getT(selId);
+        if (p.s % 3600 === 0) { t.unit = 3600; t.value = p.s / 3600; }
+        else if (p.s % 60 === 0) { t.unit = 60; t.value = p.s / 60; }
+        else { t.unit = 1; t.value = p.s; }
+        intervalChanged(t);
+      });
+      box.appendChild(b);
+    });
+  }
+  function intervalChanged(t) {
+    if (t.running) R(t.id).nextAt = Date.now() + secs(t) * 1000;
+    save(); render();
+  }
+
+  /* ---------- events ---------- */
+  $("fName").addEventListener("input", function (e) { var t = getT(selId); t.name = e.target.value; save(); renderList(); });
+  $("fUrl").addEventListener("input", function (e) { var t = getT(selId); t.url = e.target.value; setErr(""); save(); renderList(); });
+  $("fUrl").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); var t = getT(selId); if (!t.running) start(t); } });
+  $("fVal").addEventListener("input", function (e) {
+    var t = getT(selId); var v = parseInt(e.target.value, 10);
+    if (!isFinite(v) || v < 1) return;
+    t.value = v; intervalChanged(t);
+  });
+  $("fVal").addEventListener("blur", function () { var t = getT(selId); $("fVal").value = t.value; });
+  $("fUnit").addEventListener("change", function (e) { var t = getT(selId); t.unit = Number(e.target.value); intervalChanged(t); });
+  $("fMax").addEventListener("input", function (e) { var t = getT(selId); var v = parseInt(e.target.value, 10); t.max = isFinite(v) && v > 0 ? v : 0; save(); });
+  $("fBust").addEventListener("change", function (e) { getT(selId).bust = e.target.checked; save(); });
+  $("fWake").addEventListener("change", function (e) { getT(selId).wake = e.target.checked; save(); syncWake(); });
+  $("modeFrame").addEventListener("click", function () { setMode("frame"); });
+  $("modePopup").addEventListener("click", function () { setMode("popup"); });
+  function setMode(m) {
+    var t = getT(selId);
+    if (t.mode === m) return;
+    if (t.running) stop(t, "Berhenti");
+    t.mode = m; save(); render();
+  }
+  $("toggle").addEventListener("click", function () {
+    var t = getT(selId);
+    if (t.running) stop(t, "Berhenti"); else start(t);
+  });
+  $("now").addEventListener("click", function () {
+    var t = getT(selId);
+    if (!t.running) return;
+    doRefresh(t);
+    if (t.running) R(t.id).nextAt = Date.now() + secs(t) * 1000;
+    paintLive();
+  });
+  $("addBtn").addEventListener("click", function () {
+    var t = newTarget({ name: "Halaman " + (targets.length + 1) });
+    targets.push(t); select(t.id);
+    $("fUrl").focus();
+  });
+  $("stopAll").addEventListener("click", function () {
+    targets.forEach(function (t) { if (t.running) { t.running = false; R(t.id).state = "Berhenti"; } });
+    save(); syncWake(); render();
+  });
+  $("fsBtn").addEventListener("click", function () {
+    var s = $("stage");
+    if (document.fullscreenElement) { document.exitFullscreen(); }
+    else if (s.requestFullscreen) { s.requestFullscreen().catch(function () {}); }
+  });
+
+  // tombol hapus halaman lewat klik kanan/tekan lama dihindari; sediakan tombol eksplisit
+  var del = document.createElement("button");
+  del.type = "button"; del.className = "btn small ghost"; del.textContent = "Hapus halaman ini";
+  del.style.marginLeft = "6px";
+  $("addBtn").parentNode.appendChild(del);
+  var delArm = false;
+  del.addEventListener("click", function () {
+    if (targets.length < 2) { setErr("Minimal harus ada satu halaman."); return; }
+    if (!delArm) { delArm = true; del.textContent = "Tekan lagi untuk hapus"; setTimeout(function () { delArm = false; del.textContent = "Hapus halaman ini"; }, 3000); return; }
+    delArm = false; del.textContent = "Hapus halaman ini";
+    var t = getT(selId), r = R(t.id);
+    if (r.frame && r.frame.parentNode) r.frame.parentNode.removeChild(r.frame);
+    delete rt[t.id];
+    targets = targets.filter(function (x) { return x.id !== t.id; });
+    selId = targets[0].id; save(); syncWake(); render();
+  });
+
+  // tema
+  var themeBtn = $("themeBtn");
+  var themeState = "auto";
+  try { themeState = localStorage.getItem("autorefresh.theme") || "auto"; } catch (e) {}
+  function applyTheme() {
+    var root = document.documentElement;
+    if (themeState === "auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", themeState);
+    themeBtn.textContent = "Tema: " + (themeState === "auto" ? "otomatis" : themeState === "dark" ? "gelap" : "terang");
+  }
+  themeBtn.addEventListener("click", function () {
+    themeState = themeState === "auto" ? "dark" : themeState === "dark" ? "light" : "auto";
+    try { localStorage.setItem("autorefresh.theme", themeState); } catch (e) {}
+    applyTheme();
+  });
+
+  // mulai
+  load();
+  // mode jendela terpisah tidak bisa lanjut otomatis tanpa klik pengguna
+  targets.forEach(function (t) { if (t.mode === "popup") t.running = false; });
+  buildChips();
+  applyTheme();
+  render();
+  // lanjutkan yang sebelumnya berjalan (mode di halaman ini)
+  targets.forEach(function (t) {
+    if (t.running && normUrl(t.url)) {
+      var r = R(t.id);
+      loadFrame(t); r.last = Date.now(); r.nextAt = Date.now() + secs(t) * 1000;
+    } else { t.running = false; }
+  });
+  if (targets.some(function (t) { return t.running; })) { ensureTicker(); syncWake(); }
+  render();
+  window.addEventListener("beforeunload", function () { save(); });
+})();
+</script>
+</body>
+</html>
